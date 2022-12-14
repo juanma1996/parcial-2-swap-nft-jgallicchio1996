@@ -1,6 +1,8 @@
 //SPDX-License-Identifier:MIT
 pragma solidity 0.8.16;
 
+import "./interfaces/IERC721TokenReceiver.sol";
+
 /// @notice This contract allow to mint, transfer and manage NFT
 /// @dev The requirements must be implemented in decreasing order of their cost.
 contract NFTContract {
@@ -28,7 +30,18 @@ contract NFTContract {
     /// @param _symbol The symbol of the NFT collection
     /// @param _tokenURI The token URI of the NFT collection
     constructor(string memory _name, string memory _symbol, string memory _tokenURI) {
-        /// ToDo: Place your code here
+        if(bytes(_name).length == 0 || bytes(_symbol).length == 0 || bytes(_tokenURI).length == 0){
+            revert("_name, _symbol and _tokenURI are mandatory parameters");
+        }
+
+        if(bytes(_symbol).length != 3){
+            revert("Invalid symbol");
+        }
+
+        name = _name;
+        symbol = _symbol;
+        tokenURI = _tokenURI;
+        owner = msg.sender;
     }
 
     /// @notice Mint a new NFT from the collection and assign the ownership to '_to' address parameter.
@@ -39,8 +52,26 @@ contract NFTContract {
     ///  `onERC721Received` on `_to` and throws if the return value is not
     ///  `bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"))`, message: "Invalid contract".
     /// @param _to The address of new owner
-    function safeMint(address _to) external {
-        /// ToDo: Place your code here
+    function safeMint(address _to) external payable{
+        if (_to == address(0)) {
+            revert("Invalid address");
+        }
+
+        if(msg.value < 1 * (10 ** uint256(16))){
+            revert("Mint has a cost of 0.01 eth");
+        }
+
+        currentTokenID++;
+        totalSupply++;
+        ownerOf[currentTokenID] = _to;
+        balanceOf[_to]++;
+
+        if(_isSmartContractAddress(_to)){
+            bytes4 retval = IERC721TokenReceiver(_to).onERC721Received(msg.sender, address(0), 1, "");
+            if (retval != bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"))) {
+                revert("Invalid contract");
+            }
+        }      
     }
 
     /// @notice Transfers the ownership of an NFT from address '_from' to address '_to'
@@ -55,7 +86,33 @@ contract NFTContract {
     /// @param _to The new owner
     /// @param _tokenId The NFT to transfer
     function safeTransferFrom(address _from, address _to, uint256 _tokenId) external {
-        /// ToDo: Place your code here
+        if (_tokenId < 1 || _tokenId > currentTokenID){
+            revert("Invalid tokenId");
+        }
+
+        if (_to == address(0)) {
+            revert("Invalid address");
+        }
+
+        if(ownerOf[_tokenId] != _from){
+            revert("Not the owner");
+        }
+
+        if(!(ownerOf[_tokenId] == msg.sender || allowance[_tokenId] == msg.sender)){
+            revert("Not authorized");
+        }
+
+        balanceOf[_from]--;
+        balanceOf[_to]++;
+        ownerOf[_tokenId] = _to;
+        allowance[_tokenId] = address(0);
+        
+        if(_isSmartContractAddress(_to)){
+            bytes4 retval = IERC721TokenReceiver(_to).onERC721Received(msg.sender, address(0), 1, "");
+            if (retval != bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"))) {
+                    revert("Invalid contract");
+            }
+        }  
     }
 
     /// @notice Change or reaffirm the approved address for an NFT
@@ -65,7 +122,15 @@ contract NFTContract {
     /// @param _approved The new administrator of the NFT
     /// @param _tokenId The NFT to approve
     function approve(address _approved, uint256 _tokenId) external {
-        /// ToDo: Place your code here
+        if (_tokenId < 1 || _tokenId > currentTokenID){
+            revert("Invalid tokenId");
+        }
+
+        if(!(ownerOf[_tokenId] == msg.sender || allowance[_tokenId] == msg.sender)){
+            revert("Not authorized");
+        }
+
+        allowance[_tokenId] = _approved;
     }
 
     /// @notice Withdrawal fees collected from the contract and sends it to the address _to
@@ -74,6 +139,30 @@ contract NFTContract {
     /// Throw if contract balance is less than 0.02 eth, with message "Insufficient balance"
     /// @param _to Withdrawal Destination
     function withdrawFees(address _to) external {
-        /// ToDo: Place your code here
+        if(msg.sender != owner){
+            revert("Not authorized");
+        }
+
+        if(_to == address(0)){
+            revert("Invalid destination address");
+        }
+
+        if(address(this).balance < 2 * (10 ** uint256(16))){
+            revert("Insufficient balance");
+        }
+
+        payable(_to).transfer(address(this).balance);
     }
+
+    // /// ------------------------------------------------------------------------------------------------------------------------------------------
+    // /// PRIVATE FUNCTIONS
+    // /// ------------------------------------------------------------------------------------------------------------------------------------------
+
+
+    function _isSmartContractAddress(address _address) private view returns (bool) {
+         bytes32 zeroAccountHash = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+         bytes32 codeHash;    
+         assembly { codeHash := extcodehash(_address) }
+         return (codeHash != zeroAccountHash && codeHash != 0x0);
+     }
 }
